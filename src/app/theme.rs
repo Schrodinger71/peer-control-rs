@@ -77,16 +77,32 @@ mod user32 {
     }
 }
 
-/// `ViewportCommand::SetTheme` заставляет winit сразу выставить DWM-атрибут
-/// тёмного заголовка окна, но не перерисовывает уже нарисованную рамку -
-/// визуально заголовок остаётся светлым до следующего системного
-/// перерисовывания (например, сворачивания/разворачивания окна). Форсируем
-/// это перерисовывание сразу же через `SetWindowPos(SWP_FRAMECHANGED)`.
-pub fn force_titlebar_redraw(window: &impl raw_window_handle::HasWindowHandle) {
+#[cfg(windows)]
+mod dwmapi {
+    unsafe extern "system" {
+        pub fn DwmSetWindowAttribute(
+            hwnd: isize,
+            attribute: u32,
+            value: *const std::ffi::c_void,
+            size: u32,
+        ) -> i32;
+    }
+}
+
+/// Красит системную рамку окна (заголовок) в тёмный режим напрямую через
+/// официально задокументированный `DWMWA_USE_IMMERSIVE_DARK_MODE` - а не
+/// через приватный API, которым для этого пользуется winit
+/// (`ViewportCommand::SetTheme`), и который на практике не всегда реально
+/// перекрашивает заголовок. Сразу же форсирует перерисовку рамки через
+/// `SetWindowPos(.., SWP_FRAMECHANGED)`, иначе она визуально останется
+/// прежней до следующего системного перерисовывания (например,
+/// сворачивания/разворачивания окна).
+pub fn apply_dark_titlebar(window: &impl raw_window_handle::HasWindowHandle) {
     #[cfg(windows)]
     {
         use raw_window_handle::RawWindowHandle;
 
+        const DWMWA_USE_IMMERSIVE_DARK_MODE: u32 = 20;
         const SWP_NOSIZE: u32 = 0x0001;
         const SWP_NOMOVE: u32 = 0x0002;
         const SWP_NOZORDER: u32 = 0x0004;
@@ -96,9 +112,17 @@ pub fn force_titlebar_redraw(window: &impl raw_window_handle::HasWindowHandle) {
         if let Ok(handle) = window.window_handle()
             && let RawWindowHandle::Win32(win32) = handle.as_raw()
         {
+            let hwnd = win32.hwnd.get();
+            let enabled: i32 = 1;
             unsafe {
+                dwmapi::DwmSetWindowAttribute(
+                    hwnd,
+                    DWMWA_USE_IMMERSIVE_DARK_MODE,
+                    (&raw const enabled).cast(),
+                    size_of::<i32>() as u32,
+                );
                 user32::SetWindowPos(
-                    win32.hwnd.get(),
+                    hwnd,
                     0,
                     0,
                     0,

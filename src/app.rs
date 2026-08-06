@@ -45,21 +45,19 @@ pub struct PeerApp {
     hotkey_active_id: Arc<Mutex<Option<u32>>>,
     hotkey_capture: Option<HotkeyCapture>,
     toasts: Vec<Toast>,
-    /// Считает первые кадры, чтобы форсировать перерисовку заголовка окна
-    /// после того как тёмная тема реально применится к нему (см.
-    /// `theme::force_titlebar_redraw`). 0 - уже сделано, ничего не делаем.
-    titlebar_redraw_countdown: u8,
 }
 
 impl PeerApp {
     pub fn new(cc: &eframe::CreationContext<'_>, cfg: Arc<RwLock<Config>>, peers: Peers) -> Self {
         // Тёмная тема всегда, независимо от настроек ОС: и внутренняя тема
         // egui (иначе она следует за системной и на светлой теме съедала бы
-        // наши цвета), и системная рамка окна (заголовок).
+        // наши цвета), и системная рамка окна (заголовок, красим напрямую
+        // через DWM, а не через приватный API winit - см. apply_dark_titlebar).
         cc.egui_ctx.set_theme(egui::ThemePreference::Dark);
-        cc.egui_ctx
-            .send_viewport_cmd(egui::ViewportCommand::SetTheme(egui::SystemTheme::Dark));
         cc.egui_ctx.set_visuals(build_visuals());
+        if let Some(window) = cc.winit_window() {
+            theme::apply_dark_titlebar(window.as_ref());
+        }
 
         let (tx, rx) = mpsc::channel();
 
@@ -130,7 +128,6 @@ impl PeerApp {
             hotkey_active_id,
             hotkey_capture: None,
             toasts: Vec::new(),
-            titlebar_redraw_countdown: 2,
         };
         if let Some(error) = startup_error {
             app.errors.push(error);
@@ -630,21 +627,7 @@ impl PeerApp {
 }
 
 impl eframe::App for PeerApp {
-    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
-        if self.titlebar_redraw_countdown > 0 {
-            self.titlebar_redraw_countdown -= 1;
-            if self.titlebar_redraw_countdown == 0 {
-                // На этом кадре наша команда SetTheme из `new()` уже точно
-                // применена к окну (winit применяет её после предыдущего
-                // кадра) - можно форсировать перерисовку заголовка.
-                if let Some(window) = frame.winit_window() {
-                    theme::force_titlebar_redraw(window.as_ref());
-                }
-            } else {
-                ui.ctx().request_repaint();
-            }
-        }
-
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.drain_events();
         let ctx = ui.ctx().clone();
 
