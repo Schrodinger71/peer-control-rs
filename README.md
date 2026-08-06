@@ -1,0 +1,69 @@
+# peer-control-rs
+
+[![CI](https://github.com/Schrodinger71/peer-control-rs/actions/workflows/rust.yml/badge.svg)](https://github.com/Schrodinger71/peer-control-rs/actions/workflows/rust.yml)
+[![Release](https://github.com/Schrodinger71/peer-control-rs/actions/workflows/release.yml/badge.svg)](https://github.com/Schrodinger71/peer-control-rs/actions/workflows/release.yml)
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
+
+[![Made with Rust](https://forthebadge.com/images/badges/made-with-rust.svg)](https://www.rust-lang.org)
+
+Каждый запущенный `peer-control-rs.exe` — одновременно и сервер, и клиент с GUI:
+слушает TCP-порт и принимает команды от других узлов, а также позволяет
+через свой интерфейс добавлять другие узлы и отправлять им те же команды.
+Сеть полностью симметрична — любой узел может отключить интернет любому
+другому. При команде `reboot_internet` узел ненадолго отключает свои
+сетевые адаптеры и одновременно принудительно завершает (как дерево
+процессов) фиксированный список: `GTA5_Enhanced.exe`,
+`GTA5_Enhanced_BE.exe`, `PlayGTAV.exe`.
+
+Требует запуска от администратора (нужны права на правила файрвола и
+отключение адаптеров) — задано в `assets/app.manifest`.
+
+## Сборка и запуск
+
+```bash
+cargo build --release
+```
+
+Готовый `peer-control-rs.exe` лежит в `target/release/`. При первом
+запуске рядом с `.exe` создаются `config.json`, `peers.json`,
+`blocked_state.json` и `peer.log`. Перед использованием отредактируйте
+`token` в `config.json` — он общий для всех узлов сети.
+
+## Структура кода
+
+```
+src/
+├── main.rs                — точка входа: инициализация, mod-декларации
+├── config.rs              — конфиг, узлы (peers), сохранение состояния в JSON
+├── logging.rs             — файловый лог + буфер для панели в GUI
+├── firewall.rs            — netsh, адаптеры, taskkill /T, блокировка процессов
+├── network.rs             — pub mod server; pub mod client;
+│   ├── server.rs          — приём TCP-запросов, rate limiting
+│   └── client.rs          — отправка команд другим узлам
+└── app.rs                 — GUI (egui/eframe): PeerApp и его impl
+    ├── theme.rs           — цвета, иконка, оформление
+    ├── hotkey.rs          — захват горячей клавиши
+    ├── dialogs.rs         — диалог добавления узла
+    └── events.rs          — события между потоками
+```
+
+Модули общаются друг с другом по стандартным Rust-путям (`crate::config::…`,
+`crate::firewall::…` и т.д.) — что откуда видно, определяется `pub` у
+конкретных элементов, а не расположением файла.
+
+## Отказ от ответственности
+
+Проект сделан в учебных целях — как пример разбиения Rust/egui-приложения
+на модули, работы с TCP, файрволом Windows и системными вызовами. Автор не
+несёт ответственности за любые последствия использования этой программы,
+включая ущерб, причинённый её работой самому пользователю или третьим лицам.
+Используете на свой страх и риск.
+
+## Лицензия
+
+Проект распространяется под лицензией [GNU Affero General Public License
+v3.0](LICENSE) (AGPL-3.0).
+
+## Автор
+
+Discord: schrodinger71
