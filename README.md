@@ -4,6 +4,8 @@
 [![Release](https://github.com/Schrodinger71/peer-control-rs/actions/workflows/release.yml/badge.svg)](https://github.com/Schrodinger71/peer-control-rs/actions/workflows/release.yml)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
 
+[![Made with Rust](https://forthebadge.com/images/badges/made-with-rust.svg)](https://www.rust-lang.org)
+
 Каждый запущенный `peer-control-rs.exe` — одновременно и сервер, и клиент с GUI:
 слушает TCP-порт и принимает команды от других узлов, а также позволяет
 через свой интерфейс добавлять другие узлы и отправлять им те же команды.
