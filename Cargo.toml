@@ -1,0 +1,17 @@
+[package]
+name = "peer-control-rs"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+eframe = { version = "0.35.0", default-features = false, features = ["default_fonts", "glow", "persistence"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+image = { version = "0.25", default-features = false, features = ["png"] }
+global-hotkey = { version = "0.8.0", features = ["serde"] }
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+sysinfo = "0.33"
+winreg = "0.55"
+
+[build-dependencies]
+winresource = "0.1"
