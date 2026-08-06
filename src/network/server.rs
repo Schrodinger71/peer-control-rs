@@ -13,6 +13,7 @@ use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::thread;
 use std::time::{Duration, Instant};
+use winrt_notification::{Duration as ToastDuration, Sound, Toast as WinToast};
 
 // ---------- ограничение частоты попыток ----------
 
@@ -128,8 +129,19 @@ fn handle_client(
                 .unwrap_or_else(|| cfg.read().unwrap().default_reboot_seconds);
             let (ok, msg) = reboot_internet(cfg, seconds);
             if ok {
+                let format_string =
+                    format!("⚠ {peer_ip} отключил(а) вам интернет на {seconds} сек");
+
+                WinToast::new(WinToast::POWERSHELL_APP_ID)
+                    .title("peer-control-rs")
+                    .text1(&format_string)
+                    .sound(Some(Sound::Default))
+                    .duration(ToastDuration::Short)
+                    .show()
+                    .ok();
+
                 let _ = tx.send(StatusEvent::Toast {
-                    message: format!("⚠ {peer_ip} отключил(а) вам интернет на {seconds} сек"),
+                    message: format_string,
                 });
             }
             json!({"ok": ok, "message": msg})
