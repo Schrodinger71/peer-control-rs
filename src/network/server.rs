@@ -13,7 +13,7 @@ use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::thread;
 use std::time::{Duration, Instant};
-use winrt_notification::{Duration as ToastDuration, Sound, Toast as WinToast};
+use tauri_winrt_notification::{Duration as ToastDuration, Sound, Toast as WinToast};
 
 // ---------- ограничение частоты попыток ----------
 
