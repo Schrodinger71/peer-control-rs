@@ -604,7 +604,7 @@ impl PeerApp {
             .show(ui, |ui| {
                 egui::ScrollArea::vertical()
                     .stick_to_bottom(true)
-                    .max_height(440.0)
+                    .max_height(220.0)
                     .auto_shrink(false)
                     .show(ui, |ui| {
                         ui.set_width(ui.available_width());
@@ -660,7 +660,7 @@ impl eframe::App for PeerApp {
                     .fill(ui.visuals().panel_fill)
                     .inner_margin(egui::Margin::symmetric(16, 10)),
             )
-            .default_size(480.0)
+            .default_size(240.0)
             .show(ui, |ui| {
                 self.show_log_panel(ui);
             });

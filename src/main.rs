@@ -62,7 +62,7 @@ fn main() {
     let (rgba, width, height) = app::theme::decode_icon();
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_title("MeshControl.exe")
+            .with_title("peer-control-rs")
             .with_inner_size([720.0, 900.0])
             .with_min_inner_size([480.0, 420.0])
             .with_icon(egui::IconData {
@@ -73,7 +73,7 @@ fn main() {
         ..Default::default()
     };
     let run_result = eframe::run_native(
-        "peer-network-node",
+        "peer-control-rs",
         options,
         Box::new(move |cc| Ok(Box::new(PeerApp::new(cc, cfg, peers)))),
     );
