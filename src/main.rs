@@ -63,7 +63,7 @@ fn main() {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("peer-control-rs")
-            .with_inner_size([720.0, 900.0])
+            .with_inner_size([720.0, 800.0])
             .with_min_inner_size([480.0, 420.0])
             .with_icon(egui::IconData {
                 rgba,

@@ -49,6 +49,12 @@ pub struct PeerApp {
 
 impl PeerApp {
     pub fn new(cc: &eframe::CreationContext<'_>, cfg: Arc<RwLock<Config>>, peers: Peers) -> Self {
+        // Тёмная тема всегда, независимо от настроек ОС: и внутренняя тема
+        // egui (иначе она следует за системной и на светлой теме съедала бы
+        // наши цвета), и системная рамка окна (заголовок).
+        cc.egui_ctx.set_theme(egui::ThemePreference::Dark);
+        cc.egui_ctx
+            .send_viewport_cmd(egui::ViewportCommand::SetTheme(egui::SystemTheme::Dark));
         cc.egui_ctx.set_visuals(build_visuals());
 
         let (tx, rx) = mpsc::channel();
