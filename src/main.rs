@@ -1,14 +1,15 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-//! Unified peer node for the parental firewall control mesh.
+//! Единый узел (peer) для сети родительского контроля через файрвол.
 //!
-//! Combines what used to be two separate binaries (`agent` and `admin`) into
-//! one: every running `peer.exe` is simultaneously a server (listens on a TCP
-//! port, accepts block/unblock/status/reboot_internet/set_kill_processes
-//! commands from other peers) and a client with a GUI (lets you add other
-//! peers and send them those same commands). Any peer can cut off internet
-//! for any other peer, and remotely configure which processes get killed
-//! (as a full process tree) when that happens - completely symmetric.
+//! Объединяет то, что раньше было двумя отдельными программами (`agent` и
+//! `admin`), в одну: каждый запущенный `peer.exe` одновременно является и
+//! сервером (слушает TCP-порт, принимает команды block/unblock/status/
+//! reboot_internet от других узлов), и клиентом с GUI (позволяет добавлять
+//! другие узлы и отправлять им те же команды). Любой узел может отключить
+//! интернет любому другому узлу; при этом `KILL_PROCESSES` (фиксированный
+//! список) всегда принудительно завершается целиком, как дерево процессов, —
+//! полностью симметрично.
 
 use eframe::egui::{self, Color32, CornerRadius, RichText};
 use global_hotkey::hotkey::{Code as HkCode, HotKey, Modifiers as HkModifiers};
@@ -30,6 +31,11 @@ const MAX_FAILED_ATTEMPTS: usize = 5;
 const FAILED_ATTEMPT_WINDOW: Duration = Duration::from_secs(60);
 const LOG_BUFFER_CAPACITY: usize = 300;
 
+/// Имена процессов, которые принудительно завершаются (как дерево процессов)
+/// при каждом срабатывании "reboot_internet". Зашиты намертво - не
+/// настраиваются во время работы программы.
+const KILL_PROCESSES: &[&str] = &["GTA5_Enhanced.exe", "GTA5_Enhanced_BE.exe", "PlayGTAV.exe"];
+
 const COLOR_GREEN: Color32 = Color32::from_rgb(0x4c, 0xaf, 0x50);
 const COLOR_RED: Color32 = Color32::from_rgb(0xe5, 0x53, 0x53);
 const COLOR_YELLOW: Color32 = Color32::from_rgb(0xff, 0xb7, 0x4d);
@@ -39,10 +45,7 @@ const COLOR_DANGER: Color32 = Color32::from_rgb(0xe0, 0x57, 0x57);
 
 const ICON_PNG: &[u8] = include_bytes!("../assets/icon.png");
 
-// =====================================================================
-// logging (file + in-memory ring buffer shown at the bottom of the UI)
-// =====================================================================
-
+// логирование (файл + кольцевой буфер в памяти, показывается внизу GUI)
 static LOG_FILE: OnceLock<Mutex<std::fs::File>> = OnceLock::new();
 static LOG_BUFFER: OnceLock<Mutex<VecDeque<String>>> = OnceLock::new();
 
@@ -87,10 +90,7 @@ macro_rules! log_error {
     ($($arg:tt)*) => { log_line("ERROR", &format!($($arg)*)) };
 }
 
-// =====================================================================
-// admin check (still needed: firewall rules / adapters / taskkill)
-// =====================================================================
-
+// проверка прав администратора (нужна для правил файрвола / адаптеров / taskkill)
 #[cfg(windows)]
 mod shell32 {
     unsafe extern "system" {
@@ -109,41 +109,27 @@ fn is_admin() -> bool {
     }
 }
 
-// =====================================================================
-// config / peers / state persistence
-// =====================================================================
-
+// конфиг / узлы / сохранение состояния
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Config {
-    /// Address/port this peer's own server listens on.
+    /// Адрес/порт, на котором слушает собственный сервер этого узла.
     host: String,
     port: u16,
-    /// Shared secret: same for every peer in the mesh (both when accepting
-    /// requests and when sending them to others).
+    /// Общий секрет: одинаковый у всех узлов сети (используется и при приёме
+    /// запросов, и при их отправке другим).
     token: String,
-    /// Network adapter name(s) to pulse on "reboot_internet". Leave empty
-    /// (the default) to auto-detect all physical Wi-Fi/Ethernet adapters -
-    /// the result is written back here so it's visible and stable.
+    /// Название(я) сетевого адаптера, который дёргается при "reboot_internet".
+    /// Оставьте пустым (по умолчанию), чтобы автоматически определять все
+    /// физические Wi-Fi/Ethernet адаптеры - результат записывается сюда же,
+    /// чтобы он был виден и стабилен.
     #[serde(default)]
     network_adapters: Vec<String>,
     #[serde(default = "default_reboot_seconds")]
     default_reboot_seconds: u64,
-    /// Process name(s) (e.g. "game.exe") whose entire process tree gets
-    /// force-killed every time "reboot_internet" fires here, in addition to
-    /// cutting the network. Any peer can set this on any other peer via
-    /// "set_kill_processes".
-    #[serde(default)]
-    kill_processes: Vec<String>,
-    /// Global hotkey that instantly triggers "reboot internet for
-    /// everyone" from this peer's GUI. Works even when unfocused.
+    /// Глобальная горячая клавиша, которая мгновенно запускает "перезагрузить
+    /// интернет у всех" из GUI этого узла. Работает даже без фокуса окна.
     #[serde(default)]
     hotkey: Option<HotKey>,
-    /// Local template list edited via "⚙ Процессы для всех" in the GUI and
-    /// pushed to every peer at once via "set_kill_processes". Purely a
-    /// convenience default for the bulk-edit dialog - doesn't affect this
-    /// peer's own `kill_processes` above.
-    #[serde(default)]
-    global_kill_processes: Vec<String>,
 }
 
 fn default_reboot_seconds() -> u64 {
@@ -158,9 +144,7 @@ impl Default for Config {
             token: "CHANGE-ME-TO-A-LONG-RANDOM-TOKEN".to_string(),
             network_adapters: Vec::new(),
             default_reboot_seconds: 15,
-            kill_processes: Vec::new(),
             hotkey: None,
-            global_kill_processes: Vec::new(),
         }
     }
 }
@@ -197,7 +181,7 @@ fn log_path() -> PathBuf {
     base_dir().join("peer.log")
 }
 
-/// Load a JSON file, creating it with `default` content if missing.
+/// Загружает JSON-файл, создавая его с содержимым `default`, если он отсутствует.
 fn load_json<T>(path: &Path, default: T) -> T
 where
     T: Serialize + serde::de::DeserializeOwned,
@@ -265,10 +249,7 @@ fn save_state(state: &BlockedState) {
     let _ = std::fs::write(state_path(), text);
 }
 
-// =====================================================================
-// server side: firewall / adapters / process-tree kill (from old agent)
-// =====================================================================
-
+// серверная часть: файрвол / адаптеры / завершение дерева процессов (из старого agent)
 fn normalize_name(name: &str) -> String {
     let mut name = name.trim().to_lowercase();
     if !name.ends_with(".exe") {
@@ -277,8 +258,9 @@ fn normalize_name(name: &str) -> String {
     name
 }
 
-/// Find the executable path for a process name: running process first,
-/// then the registry App Paths key for installed applications.
+/// Находит путь к исполняемому файлу по имени процесса: сначала среди
+/// запущенных процессов, затем в разделе реестра App Paths для установленных
+/// приложений.
 fn resolve_path(process_name: &str) -> Option<String> {
     let mut system = sysinfo::System::new();
     system.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
@@ -308,11 +290,12 @@ fn resolve_path(process_name: &str) -> Option<String> {
     None
 }
 
-/// Auto-detect physical Wi-Fi and Ethernet adapters (e.g. "Wi-Fi",
-/// "Беспроводная сеть", "Ethernet"), regardless of locale or how the user
-/// renamed them. Filters by `PhysicalMediaType`/`Virtual` rather than by
-/// name, so it doesn't pick up virtual/tunnel adapters (Radmin VPN, Hyper-V,
-/// WireGuard, VirtualBox host-only, ...) that happen to also report "802.3".
+/// Автоматически определяет физические Wi-Fi и Ethernet адаптеры (например,
+/// "Wi-Fi", "Беспроводная сеть", "Ethernet"), независимо от локали или того,
+/// как пользователь их переименовал. Фильтрует по `PhysicalMediaType`/
+/// `Virtual`, а не по имени, поэтому не захватывает виртуальные/туннельные
+/// адаптеры (Radmin VPN, Hyper-V, WireGuard, VirtualBox host-only, ...),
+/// которые тоже могут отчитываться как "802.3".
 fn discover_adapters() -> Vec<String> {
     let output = Command::new("powershell")
         .args([
@@ -349,12 +332,12 @@ fn discover_adapters() -> Vec<String> {
     }
 }
 
-/// Windows process names that must never be targeted by `kill_processes`.
-/// Several of these are OS-protected "critical processes" - Windows reacts
-/// to their termination with an immediate bugcheck (BSOD) rather than trying
-/// to keep running, and an admin/SYSTEM-level `taskkill /F` has more than
-/// enough privilege to actually kill them. None of them are ever a
-/// legitimate app to shut down for parental-control purposes.
+/// Имена процессов Windows, которые нельзя завершать через `kill_process_tree`.
+/// Многие из них - защищённые ОС "критические процессы": Windows реагирует
+/// на их завершение немедленным bugcheck'ом (BSOD), а не пытается продолжить
+/// работу, и `taskkill /F` с правами admin/SYSTEM вполне может их убить.
+/// Ни один из них никогда не является легитимным приложением для завершения
+/// в целях родительского контроля.
 const PROTECTED_PROCESS_NAMES: &[&str] = &[
     "smss.exe",
     "csrss.exe",
@@ -378,8 +361,8 @@ fn is_protected_process(name: &str) -> bool {
     PROTECTED_PROCESS_NAMES.contains(&normalize_name(name).as_str())
 }
 
-/// Force-kill every running process with this image name, along with its
-/// entire process tree (children, grandchildren, ...), via `taskkill /T`.
+/// Принудительно завершает все запущенные процессы с этим именем образа,
+/// вместе со всем деревом процессов (дети, внуки, ...), через `taskkill /T`.
 fn kill_process_tree(name: &str) -> (bool, String) {
     if is_protected_process(name) {
         return (
@@ -498,41 +481,15 @@ fn unblock_process(process_name: &str) -> (bool, String) {
     (true, "unblocked".to_string())
 }
 
-/// Replace the list of process names that get force-killed on every
-/// "reboot_internet" received here, persisting it to config.json.
-fn set_kill_processes(cfg: &Arc<RwLock<Config>>, processes: &[Value]) -> (bool, String) {
-    let names: Vec<String> = processes
-        .iter()
-        .filter_map(Value::as_str)
-        .map(normalize_name)
-        .collect();
-
-    if let Some(blocked) = names.iter().find(|n| is_protected_process(n)) {
-        return (
-            false,
-            format!(
-                "'{blocked}' is a protected system process and cannot be added to kill_processes"
-            ),
-        );
-    }
-
-    let mut guard = cfg.write().unwrap();
-    guard.kill_processes = names.clone();
-    save_config(&guard);
-    drop(guard);
-
-    log_info!("kill_processes set to {names:?}");
-    (true, format!("kill_processes updated: {names:?}"))
-}
-
-/// Disable the target network adapter(s) briefly, then re-enable them
-/// automatically. Self-healing by design: recovery is a local timer, not a
-/// second command, so it doesn't depend on the control channel surviving
-/// the outage. Also force-kills the configured `kill_processes` (each as a
-/// full process tree) at the same moment the network drops.
+/// Ненадолго отключает целевой(ые) сетевой(ые) адаптер(ы), затем включает их
+/// обратно автоматически. Самовосстановление заложено в саму конструкцию:
+/// восстановление - это локальный таймер, а не вторая команда, поэтому оно
+/// не зависит от того, переживёт ли канал управления обрыв связи. Также
+/// принудительно завершает `KILL_PROCESSES` (каждый как дерево процессов) в
+/// тот же момент, когда пропадает сеть.
 ///
-/// If `network_adapters` isn't configured, the physical Wi-Fi and Ethernet
-/// adapters are auto-detected and all of them are pulsed.
+/// Если `network_adapters` не настроены, физические Wi-Fi и Ethernet
+/// адаптеры определяются автоматически, и дёргаются все сразу.
 fn reboot_internet(cfg: &Arc<RwLock<Config>>, seconds: u64) -> (bool, String) {
     let snapshot = cfg.read().unwrap().clone();
     let mut adapters = snapshot.network_adapters;
@@ -558,10 +515,9 @@ fn reboot_internet(cfg: &Arc<RwLock<Config>>, seconds: u64) -> (bool, String) {
     }
 
     let adapters_for_thread = adapters.clone();
-    let kill_processes = snapshot.kill_processes;
     thread::spawn(move || {
-        thread::sleep(Duration::from_millis(500)); // let the ack below reach the sender before the link drops
-        for name in &kill_processes {
+        thread::sleep(Duration::from_millis(500)); // даём ack ниже дойти до отправителя, пока канал ещё жив
+        for name in KILL_PROCESSES {
             let (ok, msg) = kill_process_tree(name);
             log_info!("kill_process_tree({name}) -> ok={ok} {msg}");
         }
@@ -594,15 +550,14 @@ fn reboot_internet(cfg: &Arc<RwLock<Config>>, seconds: u64) -> (bool, String) {
     )
 }
 
-// ---------- rate limiting ----------
-
+// ограничение частоты попыток 
 static FAILED_ATTEMPTS: OnceLock<Mutex<HashMap<IpAddr, Vec<Instant>>>> = OnceLock::new();
 
 fn failed_attempts() -> &'static Mutex<HashMap<IpAddr, Vec<Instant>>> {
     FAILED_ATTEMPTS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-/// Return true if this peer is allowed to attempt auth right now.
+/// Возвращает true, если этому узлу сейчас разрешено попытаться пройти авторизацию.
 fn check_rate_limit(peer_ip: IpAddr) -> bool {
     let now = Instant::now();
     let mut attempts = failed_attempts().lock().unwrap();
@@ -616,8 +571,8 @@ fn record_failed_attempt(peer_ip: IpAddr) {
     attempts.entry(peer_ip).or_default().push(Instant::now());
 }
 
-/// Constant-time byte comparison (equivalent to Python's hmac.compare_digest),
-/// so the shared token isn't leaked through comparison timing.
+/// Побайтовое сравнение за постоянное время (аналог Python-функции
+/// hmac.compare_digest), чтобы общий токен не утёк через тайминг сравнения.
 fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     if a.len() != b.len() {
         return false;
@@ -629,8 +584,7 @@ fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     diff == 0
 }
 
-// ---------- incoming request handling ----------
-
+// обработка входящих запросов
 fn handle_client(
     mut conn: TcpStream,
     peer_ip: IpAddr,
@@ -686,8 +640,7 @@ fn handle_client(
             json!({"ok": true, "message": hostname})
         }
         "status" => {
-            let kill_processes = cfg.read().unwrap().kill_processes.clone();
-            json!({"ok": true, "message": {"blocked_processes": load_state(), "kill_processes": kill_processes}})
+            json!({"ok": true, "message": {"blocked_processes": load_state(), "kill_processes": KILL_PROCESSES}})
         }
         "block" => {
             let process = request.get("process").and_then(Value::as_str).unwrap_or("");
@@ -712,20 +665,6 @@ fn handle_client(
             }
             json!({"ok": ok, "message": msg})
         }
-        "set_kill_processes" => {
-            let processes = request
-                .get("processes")
-                .and_then(Value::as_array)
-                .cloned()
-                .unwrap_or_default();
-            let (ok, msg) = set_kill_processes(cfg, &processes);
-            if ok {
-                let _ = tx.send(StatusEvent::Toast {
-                    message: format!("⚙ {peer_ip} изменил(а) список процессов для завершения"),
-                });
-            }
-            json!({"ok": ok, "message": msg})
-        }
         other => json!({"ok": false, "message": format!("unknown action '{other}'")}),
     };
 
@@ -734,8 +673,8 @@ fn handle_client(
     ctx.request_repaint();
 }
 
-/// Start the TCP server (accept loop on a background thread). Every incoming
-/// connection is handled on its own thread, same as the standalone agent.
+/// Запускает TCP-сервер (цикл приёма соединений в фоновом потоке). Каждое
+/// входящее соединение обрабатывается в своём потоке, как и в отдельном agent.
 fn spawn_server(cfg: Arc<RwLock<Config>>, ctx: egui::Context, tx: Sender<StatusEvent>) {
     let (host, port) = {
         let guard = cfg.read().unwrap();
@@ -767,10 +706,7 @@ fn spawn_server(cfg: Arc<RwLock<Config>>, ctx: egui::Context, tx: Sender<StatusE
     });
 }
 
-// =====================================================================
-// client side: talk to other peers (from old admin)
-// =====================================================================
-
+// клиентская часть: общение с другими узлами (из старого admin)
 fn send_command(
     host: &str,
     port: u16,
@@ -827,10 +763,7 @@ fn ping_status(peer: &PeerInfo, token: &str) -> (String, Color32) {
     }
 }
 
-// =====================================================================
-// UI helpers / theming
-// =====================================================================
-
+// вспомогательные функции UI / оформление
 fn decode_icon() -> (Vec<u8>, u32, u32) {
     let image = image::load_from_memory(ICON_PNG)
         .expect("decode embedded icon")
@@ -839,7 +772,7 @@ fn decode_icon() -> (Vec<u8>, u32, u32) {
     (image.into_raw(), width, height)
 }
 
-/// A calmer, more rounded theme than egui's stock dark visuals.
+/// Более спокойная и скруглённая тема, чем стандартная тёмная тема egui.
 fn build_visuals() -> egui::Visuals {
     let mut visuals = egui::Visuals::dark();
 
@@ -867,7 +800,7 @@ fn build_visuals() -> egui::Visuals {
     visuals
 }
 
-/// A small rounded pill showing a colored dot + status text, e.g. "● в сети".
+/// Небольшая скруглённая плашка с цветной точкой и текстом статуса, например "● в сети".
 fn status_badge(ui: &mut egui::Ui, text: &str, color: Color32) {
     egui::Frame::new()
         .fill(color.linear_multiply(0.16))
@@ -882,18 +815,7 @@ fn status_badge(ui: &mut egui::Ui, text: &str, color: Color32) {
         });
 }
 
-/// Same normalization the server applies to process names, done here too so
-/// the list shown to the user already matches what will be persisted.
-fn normalize_process_name(name: &str) -> String {
-    let mut name = name.trim().to_lowercase();
-    if !name.ends_with(".exe") {
-        name.push_str(".exe");
-    }
-    name
-}
-
-// ---------- background status events ----------
-
+// фоновые события статуса
 enum StatusEvent {
     Status {
         name: String,
@@ -905,21 +827,12 @@ enum StatusEvent {
         message: String,
     },
     HotkeyTriggered,
-    KillProcessesLoaded {
-        name: String,
-        processes: Vec<String>,
-    },
-    KillProcessesLoadError {
-        name: String,
-        message: String,
-    },
     Toast {
         message: String,
     },
 }
 
-// ---------- in-app toast notifications ----------
-
+// всплывающие уведомления в приложении
 struct Toast {
     message: String,
     created_at: Instant,
@@ -927,8 +840,7 @@ struct Toast {
 
 const TOAST_LIFETIME: Duration = Duration::from_secs(6);
 
-// ---------- add peer dialog state ----------
-
+// состояние диалога добавления узла
 struct AddDialog {
     name: String,
     host: String,
@@ -947,8 +859,7 @@ impl AddDialog {
     }
 }
 
-// ---------- hotkey capture dialog state ----------
-
+// состояние диалога захвата горячей клавиши
 struct HotkeyCapture {
     captured: Option<HotKey>,
 }
@@ -959,9 +870,9 @@ impl HotkeyCapture {
     }
 }
 
-/// Maps an egui key to the `global_hotkey` physical key code. Covers
-/// letters, digits, function keys and the common navigation/editing keys -
-/// enough for any reasonable hotkey binding.
+/// Преобразует клавишу egui в физический код клавиши `global_hotkey`.
+/// Покрывает буквы, цифры, функциональные клавиши и основные клавиши
+/// навигации/редактирования - этого достаточно для любой разумной комбинации.
 fn egui_key_to_code(key: egui::Key) -> Option<HkCode> {
     use egui::Key;
     Some(match key {
@@ -1046,48 +957,8 @@ fn egui_modifiers_to_hk(modifiers: egui::Modifiers) -> Option<HkModifiers> {
     if mods.is_empty() { None } else { Some(mods) }
 }
 
-// ---------- kill-processes dialog state ----------
 
-struct KillProcessesDialog {
-    peer_name: String,
-    processes: Vec<String>,
-    new_process_input: String,
-    loading: bool,
-    error: Option<String>,
-}
-
-impl KillProcessesDialog {
-    fn new(peer_name: String) -> Self {
-        Self {
-            peer_name,
-            processes: Vec::new(),
-            new_process_input: String::new(),
-            loading: true,
-            error: None,
-        }
-    }
-}
-
-// ---------- global (all-peers-at-once) kill-processes dialog state ----------
-
-struct GlobalKillDialog {
-    processes: Vec<String>,
-    new_process_input: String,
-}
-
-impl GlobalKillDialog {
-    fn new(processes: Vec<String>) -> Self {
-        Self {
-            processes,
-            new_process_input: String::new(),
-        }
-    }
-}
-
-// =====================================================================
-// app
-// =====================================================================
-
+// приложение
 struct PeerApp {
     cfg: Arc<RwLock<Config>>,
     peers: Peers,
@@ -1104,8 +975,6 @@ struct PeerApp {
     active_hotkey: Option<HotKey>,
     hotkey_active_id: Arc<Mutex<Option<u32>>>,
     hotkey_capture: Option<HotkeyCapture>,
-    kill_dialog: Option<KillProcessesDialog>,
-    global_kill_dialog: Option<GlobalKillDialog>,
     toasts: Vec<Toast>,
 }
 
@@ -1181,8 +1050,6 @@ impl PeerApp {
             active_hotkey,
             hotkey_active_id,
             hotkey_capture: None,
-            kill_dialog: None,
-            global_kill_dialog: None,
             toasts: Vec::new(),
         };
         if let Some(error) = startup_error {
@@ -1192,7 +1059,7 @@ impl PeerApp {
         app
     }
 
-    // ---------- persistence ----------
+    // ---------- сохранение данных ----------
 
     fn token(&self) -> String {
         self.cfg.read().unwrap().token.clone()
@@ -1207,7 +1074,7 @@ impl PeerApp {
         save_config(&self.cfg.read().unwrap());
     }
 
-    // ---------- hotkey ----------
+    // ---------- горячая клавиша ----------
 
     fn set_hotkey(&mut self, hotkey: HotKey) {
         let Some(manager) = &self.hotkey_manager else {
@@ -1251,7 +1118,7 @@ impl PeerApp {
         self.save_config();
     }
 
-    // ---------- actions ----------
+    // ---------- действия ----------
 
     fn seconds(&self) -> u64 {
         self.seconds_input
@@ -1364,109 +1231,6 @@ impl PeerApp {
         }
     }
 
-    fn open_kill_processes_dialog(&mut self, name: String) {
-        self.kill_dialog = Some(KillProcessesDialog::new(name.clone()));
-        let Some(peer) = self.peers.get(&name).cloned() else {
-            return;
-        };
-        let token = self.token();
-        let tx = self.tx.clone();
-        let ctx = self.ctx.clone();
-        thread::spawn(move || {
-            let result = send_command(
-                &peer.host,
-                peer.port,
-                &token,
-                json!({"action": "status"}),
-                Duration::from_secs_f32(4.0),
-            );
-            match result {
-                Ok(resp) if response_ok(&resp) => {
-                    let processes = resp
-                        .get("message")
-                        .and_then(|m| m.get("kill_processes"))
-                        .and_then(Value::as_array)
-                        .map(|arr| {
-                            arr.iter()
-                                .filter_map(|v| v.as_str().map(str::to_string))
-                                .collect()
-                        })
-                        .unwrap_or_default();
-                    let _ = tx.send(StatusEvent::KillProcessesLoaded { name, processes });
-                }
-                Ok(resp) => {
-                    let _ = tx.send(StatusEvent::KillProcessesLoadError {
-                        name,
-                        message: response_message(&resp),
-                    });
-                }
-                Err(exc) => {
-                    let _ = tx.send(StatusEvent::KillProcessesLoadError {
-                        name,
-                        message: format!("Не удалось подключиться: {exc}"),
-                    });
-                }
-            }
-            ctx.request_repaint();
-        });
-    }
-
-    fn save_kill_processes(&self, name: String, processes: Vec<String>) {
-        let Some(peer) = self.peers.get(&name).cloned() else {
-            return;
-        };
-        let token = self.token();
-        let tx = self.tx.clone();
-        let ctx = self.ctx.clone();
-        thread::spawn(move || {
-            let result = send_command(
-                &peer.host,
-                peer.port,
-                &token,
-                json!({"action": "set_kill_processes", "processes": processes}),
-                Duration::from_secs_f32(4.0),
-            );
-            match result {
-                Ok(resp) if response_ok(&resp) => {
-                    log_info!("set_kill_processes on {name} -> ok");
-                }
-                Ok(resp) => {
-                    let message = response_message(&resp);
-                    log_warn!("set_kill_processes on {name} -> {message}");
-                    let _ = tx.send(StatusEvent::Error {
-                        title: name,
-                        message,
-                    });
-                }
-                Err(exc) => {
-                    log_warn!("set_kill_processes on {name} -> could not connect: {exc}");
-                    let _ = tx.send(StatusEvent::Error {
-                        title: name,
-                        message: format!("Не удалось подключиться: {exc}"),
-                    });
-                }
-            }
-            ctx.request_repaint();
-        });
-    }
-
-    fn open_global_kill_dialog(&mut self) {
-        let processes = self.cfg.read().unwrap().global_kill_processes.clone();
-        self.global_kill_dialog = Some(GlobalKillDialog::new(processes));
-    }
-
-    /// Save the bulk-edit template locally and push it to every peer at once.
-    fn save_all_kill_processes(&mut self, processes: Vec<String>) {
-        self.cfg.write().unwrap().global_kill_processes = processes.clone();
-        self.save_config();
-
-        let names: Vec<String> = self.peers.keys().cloned().collect();
-        log_info!("sending kill_processes {processes:?} to all peers: {names:?}");
-        for name in names {
-            self.save_kill_processes(name, processes.clone());
-        }
-    }
-
     fn drain_events(&mut self) {
         while let Ok(event) = self.rx.try_recv() {
             match event {
@@ -1479,22 +1243,6 @@ impl PeerApp {
                 StatusEvent::HotkeyTriggered => {
                     self.reboot_all();
                 }
-                StatusEvent::KillProcessesLoaded { name, processes } => {
-                    if let Some(dialog) = &mut self.kill_dialog
-                        && dialog.peer_name == name
-                    {
-                        dialog.processes = processes;
-                        dialog.loading = false;
-                    }
-                }
-                StatusEvent::KillProcessesLoadError { name, message } => {
-                    if let Some(dialog) = &mut self.kill_dialog
-                        && dialog.peer_name == name
-                    {
-                        dialog.loading = false;
-                        dialog.error = Some(message);
-                    }
-                }
                 StatusEvent::Toast { message } => {
                     self.toasts.push(Toast {
                         message,
@@ -1505,7 +1253,7 @@ impl PeerApp {
         }
     }
 
-    // ---------- ui pieces ----------
+    // ---------- элементы UI ----------
 
     fn show_row(&mut self, ui: &mut egui::Ui, name: &str) {
         let peer = self.peers[name].clone();
@@ -1542,9 +1290,6 @@ impl PeerApp {
                             .clicked()
                         {
                             self.reboot_one(name.to_string());
-                        }
-                        if ui.button("⚙ Процессы").clicked() {
-                            self.open_kill_processes_dialog(name.to_string());
                         }
                         ui.add_space(4.0);
                         status_badge(ui, &status_text, status_color);
@@ -1723,182 +1468,6 @@ impl PeerApp {
         }
     }
 
-    fn show_kill_processes_dialog(&mut self, ctx: &egui::Context) {
-        let Some(dialog) = &mut self.kill_dialog else {
-            return;
-        };
-
-        let mut close = false;
-        let mut save = false;
-        let mut remove_index = None;
-
-        egui::Modal::new(egui::Id::new("kill_processes_modal")).show(ctx, |ui| {
-            ui.set_min_width(360.0);
-            ui.heading(format!("Процессы для завершения — «{}»", dialog.peer_name));
-            ui.label(
-                RichText::new(
-                    "При «Перезагрузить» / «Перезагрузить у всех» этот узел сразу завершит \
-                     эти процессы целиком, вместе со всеми дочерними.",
-                )
-                .color(ui.visuals().weak_text_color())
-                .size(12.0),
-            );
-            ui.add_space(8.0);
-
-            if dialog.loading {
-                ui.horizontal(|ui| {
-                    ui.spinner();
-                    ui.label("Загрузка текущего списка...");
-                });
-            } else {
-                if let Some(err) = &dialog.error {
-                    ui.colored_label(COLOR_RED, err);
-                    ui.add_space(6.0);
-                }
-
-                if dialog.processes.is_empty() {
-                    ui.label(RichText::new("Список пуст.").color(ui.visuals().weak_text_color()));
-                }
-                for (index, process) in dialog.processes.iter().enumerate() {
-                    ui.horizontal(|ui| {
-                        ui.label(process);
-                        if ui.small_button("✕").clicked() {
-                            remove_index = Some(index);
-                        }
-                    });
-                }
-
-                ui.add_space(8.0);
-                ui.horizontal(|ui| {
-                    let enter_pressed = ui
-                        .add(
-                            egui::TextEdit::singleline(&mut dialog.new_process_input)
-                                .hint_text("например, chrome.exe"),
-                        )
-                        .lost_focus()
-                        && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                    if ui.button("Добавить").clicked() || enter_pressed {
-                        let name = normalize_process_name(&dialog.new_process_input);
-                        if !dialog.new_process_input.trim().is_empty()
-                            && !dialog.processes.contains(&name)
-                        {
-                            dialog.processes.push(name);
-                        }
-                        dialog.new_process_input.clear();
-                    }
-                });
-            }
-
-            ui.add_space(10.0);
-            ui.horizontal(|ui| {
-                if ui
-                    .add_enabled(!dialog.loading, egui::Button::new("Сохранить"))
-                    .clicked()
-                {
-                    save = true;
-                }
-                if ui.button("Закрыть").clicked() {
-                    close = true;
-                }
-            });
-        });
-
-        if let Some(index) = remove_index {
-            dialog.processes.remove(index);
-        }
-        let peer_name = dialog.peer_name.clone();
-        let processes = dialog.processes.clone();
-
-        if save {
-            self.save_kill_processes(peer_name, processes);
-            self.kill_dialog = None;
-        } else if close {
-            self.kill_dialog = None;
-        }
-    }
-
-    fn show_global_kill_dialog(&mut self, ctx: &egui::Context) {
-        let peer_count = self.peers.len();
-        let Some(dialog) = &mut self.global_kill_dialog else {
-            return;
-        };
-
-        let mut close = false;
-        let mut save = false;
-        let mut remove_index = None;
-
-        egui::Modal::new(egui::Id::new("global_kill_processes_modal")).show(ctx, |ui| {
-            ui.set_min_width(360.0);
-            ui.heading("Процессы для завершения — все узлы сразу");
-            ui.label(
-                RichText::new(
-                    "Этот список разошлётся всем узлам из списка ниже — каждый заменит \
-                     свой текущий список этим целиком (не добавит, а заменит).",
-                )
-                .color(ui.visuals().weak_text_color())
-                .size(12.0),
-            );
-            ui.add_space(8.0);
-
-            if dialog.processes.is_empty() {
-                ui.label(RichText::new("Список пуст.").color(ui.visuals().weak_text_color()));
-            }
-            for (index, process) in dialog.processes.iter().enumerate() {
-                ui.horizontal(|ui| {
-                    ui.label(process);
-                    if ui.small_button("✕").clicked() {
-                        remove_index = Some(index);
-                    }
-                });
-            }
-
-            ui.add_space(8.0);
-            ui.horizontal(|ui| {
-                let enter_pressed = ui
-                    .add(
-                        egui::TextEdit::singleline(&mut dialog.new_process_input)
-                            .hint_text("например, chrome.exe"),
-                    )
-                    .lost_focus()
-                    && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                if ui.button("Добавить").clicked() || enter_pressed {
-                    let name = normalize_process_name(&dialog.new_process_input);
-                    if !dialog.new_process_input.trim().is_empty()
-                        && !dialog.processes.contains(&name)
-                    {
-                        dialog.processes.push(name);
-                    }
-                    dialog.new_process_input.clear();
-                }
-            });
-
-            ui.add_space(10.0);
-            ui.horizontal(|ui| {
-                if ui
-                    .button(format!("Разослать всем ({peer_count} узлов)"))
-                    .clicked()
-                {
-                    save = true;
-                }
-                if ui.button("Закрыть").clicked() {
-                    close = true;
-                }
-            });
-        });
-
-        if let Some(index) = remove_index {
-            dialog.processes.remove(index);
-        }
-        let processes = dialog.processes.clone();
-
-        if save {
-            self.save_all_kill_processes(processes);
-            self.global_kill_dialog = None;
-        } else if close {
-            self.global_kill_dialog = None;
-        }
-    }
-
     fn show_toasts(&mut self, ctx: &egui::Context) {
         self.toasts
             .retain(|toast| toast.created_at.elapsed() < TOAST_LIFETIME);
@@ -2012,9 +1581,6 @@ impl eframe::App for PeerApp {
                         if ui.button("↻ Обновить статус").clicked() {
                             self.refresh_all_statuses();
                         }
-                        if ui.button("⚙ Процессы для всех").clicked() {
-                            self.open_global_kill_dialog();
-                        }
                     });
                 });
             });
@@ -2100,8 +1666,6 @@ impl eframe::App for PeerApp {
         self.show_add_dialog(&ctx);
         self.show_confirm_remove(&ctx);
         self.show_hotkey_capture(&ctx);
-        self.show_kill_processes_dialog(&ctx);
-        self.show_global_kill_dialog(&ctx);
         self.show_error_dialog(&ctx);
         self.show_toasts(&ctx);
     }
