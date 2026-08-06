@@ -387,6 +387,10 @@ impl PeerApp {
             ui.set_min_width(320.0);
             ui.heading("Новый узел сети");
             ui.add_space(8.0);
+            
+            ui.label("Чтобы добавить узел, введите его название, айпи адрес узла например из RadminVPN и порт. \n\n\
+            Пример: название «Компьютер1», адрес «27.0.0.1», порт по умолчанию можно ни трогать.  \n\n\
+            Если RadminVPN-адрес — это «localhost», он будет заменён на «127.0.0.1». Таким образом вы добавите свой компьютер в список узлов. \n\n ");
 
             egui::Grid::new("add_peer_grid")
                 .num_columns(2)
@@ -422,8 +426,12 @@ impl PeerApp {
 
         if submit {
             let name = dialog.name.trim().to_string();
-            let host = dialog.host.trim().to_string();
+            let mut host = dialog.host.trim().to_string();
             let port: Option<u16> = dialog.port.trim().parse().ok();
+
+            if host == "localhost" {
+                host = "127.0.0.1".to_string();
+            }
 
             if name.is_empty() {
                 dialog.error = Some("Введите название компьютера.".to_string());
