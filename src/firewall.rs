@@ -1,7 +1,7 @@
 // серверная часть: файрвол / адаптеры / завершение дерева процессов (из старого agent)
 use std::process::Command;
 use std::sync::{Arc, RwLock};
-use std::{thread};
+use std::thread;
 use std::time::Duration;
 
 use crate::config::{Config, load_state, save_config, save_state};

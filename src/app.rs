@@ -22,7 +22,9 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
 use std::time::{Duration, Instant};
-use theme::{COLOR_ACCENT, COLOR_DANGER, COLOR_GRAY, COLOR_RED, COLOR_YELLOW, build_visuals, status_badge};
+use theme::{
+    COLOR_ACCENT, COLOR_DANGER, COLOR_GRAY, COLOR_RED, COLOR_YELLOW, build_visuals, status_badge,
+};
 
 const DEFAULT_SECONDS: u64 = 15;
 
