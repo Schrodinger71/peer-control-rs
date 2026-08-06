@@ -1740,6 +1740,7 @@ dependencies = [
  "eframe",
  "global-hotkey",
  "image",
+ "raw-window-handle",
  "serde",
  "serde_json",
  "sysinfo",

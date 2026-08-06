@@ -61,3 +61,56 @@ pub fn status_badge(ui: &mut egui::Ui, text: &str, color: Color32) {
             });
         });
 }
+
+#[cfg(windows)]
+mod user32 {
+    unsafe extern "system" {
+        pub fn SetWindowPos(
+            hwnd: isize,
+            hwnd_insert_after: isize,
+            x: i32,
+            y: i32,
+            cx: i32,
+            cy: i32,
+            flags: u32,
+        ) -> i32;
+    }
+}
+
+/// `ViewportCommand::SetTheme` заставляет winit сразу выставить DWM-атрибут
+/// тёмного заголовка окна, но не перерисовывает уже нарисованную рамку -
+/// визуально заголовок остаётся светлым до следующего системного
+/// перерисовывания (например, сворачивания/разворачивания окна). Форсируем
+/// это перерисовывание сразу же через `SetWindowPos(SWP_FRAMECHANGED)`.
+pub fn force_titlebar_redraw(window: &impl raw_window_handle::HasWindowHandle) {
+    #[cfg(windows)]
+    {
+        use raw_window_handle::RawWindowHandle;
+
+        const SWP_NOSIZE: u32 = 0x0001;
+        const SWP_NOMOVE: u32 = 0x0002;
+        const SWP_NOZORDER: u32 = 0x0004;
+        const SWP_NOACTIVATE: u32 = 0x0010;
+        const SWP_FRAMECHANGED: u32 = 0x0020;
+
+        if let Ok(handle) = window.window_handle()
+            && let RawWindowHandle::Win32(win32) = handle.as_raw()
+        {
+            unsafe {
+                user32::SetWindowPos(
+                    win32.hwnd.get(),
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    SWP_NOSIZE | SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
+                );
+            }
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = window;
+    }
+}

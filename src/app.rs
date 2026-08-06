@@ -45,6 +45,10 @@ pub struct PeerApp {
     hotkey_active_id: Arc<Mutex<Option<u32>>>,
     hotkey_capture: Option<HotkeyCapture>,
     toasts: Vec<Toast>,
+    /// Считает первые кадры, чтобы форсировать перерисовку заголовка окна
+    /// после того как тёмная тема реально применится к нему (см.
+    /// `theme::force_titlebar_redraw`). 0 - уже сделано, ничего не делаем.
+    titlebar_redraw_countdown: u8,
 }
 
 impl PeerApp {
@@ -126,6 +130,7 @@ impl PeerApp {
             hotkey_active_id,
             hotkey_capture: None,
             toasts: Vec::new(),
+            titlebar_redraw_countdown: 2,
         };
         if let Some(error) = startup_error {
             app.errors.push(error);
@@ -625,7 +630,21 @@ impl PeerApp {
 }
 
 impl eframe::App for PeerApp {
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        if self.titlebar_redraw_countdown > 0 {
+            self.titlebar_redraw_countdown -= 1;
+            if self.titlebar_redraw_countdown == 0 {
+                // На этом кадре наша команда SetTheme из `new()` уже точно
+                // применена к окну (winit применяет её после предыдущего
+                // кадра) - можно форсировать перерисовку заголовка.
+                if let Some(window) = frame.winit_window() {
+                    theme::force_titlebar_redraw(window.as_ref());
+                }
+            } else {
+                ui.ctx().request_repaint();
+            }
+        }
+
         self.drain_events();
         let ctx = ui.ctx().clone();
 
