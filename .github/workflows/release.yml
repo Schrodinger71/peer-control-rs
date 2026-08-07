@@ -20,6 +20,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -34,15 +35,56 @@ jobs:
         id: tag
         shell: bash
         run: |
-          VERSION=$(grep -m1 '^version' Cargo.toml | sed -E 's/version = "(.*)"/\1/')
+          BASE=$(grep -m1 '^version' Cargo.toml | sed -E 's/version = "([0-9]+\.[0-9]+)\..*"/\1/')
+          PATCH=$(git rev-list --count "${{ github.event.workflow_run.head_sha }}")
           SHA=$(echo "${{ github.event.workflow_run.head_sha }}" | cut -c1-7)
-          echo "tag=v${VERSION}-${SHA}" >> "$GITHUB_OUTPUT"
+          echo "tag=v${BASE}.${PATCH}-${SHA}" >> "$GITHUB_OUTPUT"
+
+      - name: Determine release title
+        id: title
+        shell: bash
+        run: |
+          SUBJECT=$(git log -1 --format=%s "${{ github.event.workflow_run.head_sha }}")
+          echo "subject=$SUBJECT" >> "$GITHUB_OUTPUT"
+
+      - name: Compute checksum
+        id: checksum
+        shell: bash
+        run: |
+          HASH=$(sha256sum target/release/peer-control-rs.exe | awk '{print $1}')
+          echo "sha256=$HASH" >> "$GITHUB_OUTPUT"
+
+      - name: Generate changelog
+        uses: orhun/git-cliff-action@v4
+        with:
+          config: cliff.toml
+          args: --unreleased --tag ${{ steps.tag.outputs.tag }} --strip header
+        env:
+          OUTPUT: CHANGELOG_LATEST.md
+          GITHUB_REPO: ${{ github.repository }}
+
+      - name: Build release notes
+        shell: bash
+        run: |
+          {
+            cat CHANGELOG_LATEST.md
+            echo
+            if [ -f assets/screenshot.png ]; then
+              echo "---"
+              echo
+              echo "![screenshot](https://raw.githubusercontent.com/${{ github.repository }}/${{ github.event.workflow_run.head_sha }}/assets/screenshot.png)"
+              echo
+            fi
+            echo "---"
+            echo
+            echo "**SHA256** (\`peer-control-rs.exe\`): \`${{ steps.checksum.outputs.sha256 }}\`"
+          } > RELEASE_BODY.md
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.tag.outputs.tag }}
-          name: ${{ steps.tag.outputs.tag }}
+          name: "${{ steps.tag.outputs.tag }} — ${{ steps.title.outputs.subject }}"
           target_commitish: ${{ github.event.workflow_run.head_sha }}
-          generate_release_notes: true
+          body_path: RELEASE_BODY.md
           files: target/release/peer-control-rs.exe

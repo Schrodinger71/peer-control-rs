@@ -1,0 +1,31 @@
+[changelog]
+header = ""
+body = """
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group }}
+{% for commit in commits %}
+- {{ commit.message | split(pat="\n") | first | trim }} ([`{{ commit.id | truncate(length=7, end="") }}`](https://github.com/{{ remote.github.owner }}/{{ remote.github.repo }}/commit/{{ commit.id }}))
+{% endfor %}
+{% endfor %}
+"""
+trim = true
+footer = ""
+
+[git]
+conventional_commits = true
+filter_unconventional = false
+split_commits = false
+commit_parsers = [
+  { message = "^feat", group = "🚀 Новое" },
+  { message = "^fix", group = "🐛 Исправления" },
+  { message = "^perf", group = "⚡ Производительность" },
+  { message = "^refactor", group = "♻️ Рефакторинг" },
+  { message = "^doc", group = "📝 Документация" },
+  { message = "^chore\\(deps\\)", group = "⬆️ Зависимости" },
+  { message = "^chore", group = "🔧 Прочее" },
+  { message = ".*", group = "🔧 Прочее" },
+]
+filter_commits = false
+tag_pattern = "v[0-9]*"
+topo_order = false
+sort_commits = "newest"
