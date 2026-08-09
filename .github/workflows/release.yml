@@ -41,8 +41,9 @@ jobs:
           else
             TAG="$RAW"
           fi
+          SHORT_SHA=$(echo "${{ github.event.workflow_run.head_sha }}" | cut -c1-6)
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "APP_VERSION=$TAG" >> "$GITHUB_ENV"
+          echo "APP_VERSION=${TAG}-${SHORT_SHA}" >> "$GITHUB_ENV"
 
       - name: Create local version tag
         # Локальный (непушенный) тег нужен только для того, чтобы `git describe`
