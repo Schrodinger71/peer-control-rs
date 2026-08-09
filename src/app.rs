@@ -668,6 +668,11 @@ impl eframe::App for PeerApp {
                         }
                     });
                 });
+                ui.label(
+                    RichText::new(env!("APP_VERSION"))
+                        .weak()
+                        .size(12.0),
+                );
             });
 
         egui::Panel::bottom("log_panel")
