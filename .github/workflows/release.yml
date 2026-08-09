@@ -45,13 +45,6 @@ jobs:
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "APP_VERSION=${TAG}-${SHORT_SHA}" >> "$GITHUB_ENV"
 
-      - name: Create local version tag
-        # Локальный (непушенный) тег нужен только для того, чтобы `git describe`
-        # в build.rs увидел точную версию при сборке. Реальный тег в GitHub
-        # создаётся ниже шагом softprops/action-gh-release.
-        shell: bash
-        run: git tag "${{ steps.tag.outputs.tag }}"
-
       - name: Build release
         run: cargo build --release --verbose
 
