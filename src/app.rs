@@ -45,6 +45,7 @@ pub struct PeerApp {
     hotkey_active_id: Arc<Mutex<Option<u32>>>,
     hotkey_capture: Option<HotkeyCapture>,
     toasts: Vec<Toast>,
+    show_about: bool,
 }
 
 impl PeerApp {
@@ -128,6 +129,7 @@ impl PeerApp {
             hotkey_active_id,
             hotkey_capture: None,
             toasts: Vec::new(),
+            show_about: false,
         };
         if let Some(error) = startup_error {
             app.errors.push(error);
@@ -361,7 +363,16 @@ impl PeerApp {
                         }
                         if ui
                             .add(
-                                egui::Button::new("Перезагрузить")
+                                egui::Button::new("⚙ Редактировать")
+                                    .fill(Color32::ORANGE.linear_multiply(0.25)),
+                            )
+                            .clicked()
+                        {
+                            self.add_dialog = Some(AddDialog::edit(name, &peer));
+                        }
+                        if ui
+                            .add(
+                                egui::Button::new("🔄 Перезапуск интернета")
                                     .fill(COLOR_ACCENT.linear_multiply(0.25)),
                             )
                             .clicked()
@@ -385,25 +396,30 @@ impl PeerApp {
 
         egui::Modal::new(egui::Id::new("add_peer_modal")).show(ctx, |ui| {
             ui.set_min_width(320.0);
-            ui.heading("Новый узел сети");
+
+            if dialog.is_edit {
+                ui.heading("Редактирование узла");
+            } else {
+                ui.heading("Новый узел сети");
+            }
             ui.add_space(8.0);
 
-            ui.label("Чтобы добавить узел, введите его название, айпи адрес узла например из RadminVPN и порт. \n\n\
-            Пример: название «Компьютер1», адрес «27.0.0.1», порт по умолчанию можно ни трогать.  \n\n\
-            Если RadminVPN-адрес — это «localhost», он будет заменён на «127.0.0.1». Таким образом вы добавите свой компьютер в список узлов. \n\n ");
+            ui.label("Введите данные узла, который вы хотите добавить в список. Узел должен быть запущен и доступен по сети. \n\n\
+            Если вы добавляете свой компьютер, используйте адрес 127.0.0.1 или localhost, порт 5990. \n\n\
+            Если вы добавляете другой компьютер в сети, используйте его айпи из RadminVPN и порт 5990 (по умолчанию). \n");
 
             egui::Grid::new("add_peer_grid")
                 .num_columns(2)
                 .show(ui, |ui| {
-                    ui.label("Название:");
+                    ui.label(RichText::new("Название:"));
                     ui.text_edit_singleline(&mut dialog.name);
                     ui.end_row();
 
-                    ui.label("RadminVPN-адрес (host):");
+                    ui.label(RichText::new("ip (host):"));
                     ui.text_edit_singleline(&mut dialog.host);
                     ui.end_row();
 
-                    ui.label("Порт:");
+                    ui.label(RichText::new("Порт:"));
                     ui.text_edit_singleline(&mut dialog.port);
                     ui.end_row();
                 });
@@ -415,7 +431,8 @@ impl PeerApp {
 
             ui.add_space(10.0);
             ui.horizontal(|ui| {
-                if ui.button("Добавить").clicked() {
+                let button_text = if dialog.is_edit { "Сохранить" } else { "Добавить" };
+                if ui.button(button_text).clicked() {
                     submit = true;
                 }
                 if ui.button("Отмена").clicked() {
@@ -424,40 +441,72 @@ impl PeerApp {
             });
         });
 
-        if submit {
-            let name = dialog.name.trim().to_string();
-            let mut host = dialog.host.trim().to_string();
-            let port: Option<u16> = dialog.port.trim().parse().ok();
-
-            if host == "localhost" {
-                host = "127.0.0.1".to_string();
-            }
-
-            if name.is_empty() {
-                dialog.error = Some("Введите название компьютера.".to_string());
-            } else if self.peers.contains_key(&name) {
-                dialog.error = Some("Узел с таким названием уже добавлен.".to_string());
-            } else if host.is_empty() {
-                dialog.error = Some("Введите RadminVPN-адрес.".to_string());
-            } else if port.is_none() {
-                dialog.error = Some("Введите корректный порт.".to_string());
-            } else {
-                self.peers.insert(
-                    name.clone(),
-                    PeerInfo {
-                        host,
-                        port: port.unwrap(),
-                    },
-                );
-                self.save_peers();
-                self.add_dialog = None;
-                self.spawn_ping(name);
-                return;
-            }
-        }
+        // ЗАКРЫВАЕМ диалог, если нажата кнопка "Отмена"
         if close {
             self.add_dialog = None;
+            return;
         }
+
+        // Если не нажата кнопка "Добавить/Сохранить" - выходим
+        if !submit {
+            return;
+        }
+
+        let dialog = self.add_dialog.take().unwrap();
+        let is_edit = dialog.is_edit;
+        let original_name = dialog.original_name.clone();
+        let name = dialog.name.trim().to_string();
+        let mut host = dialog.host.trim().to_string();
+        let port: Option<u16> = dialog.port.trim().parse().ok();
+
+        if host == "localhost" {
+            host = "127.0.0.1".to_string();
+        }
+
+        // Проверяем ошибки
+        if name.is_empty() {
+            let mut new_dialog = dialog;
+            new_dialog.error = Some("Введите название компьютера.".to_string());
+            self.add_dialog = Some(new_dialog);
+            return;
+        } else if host.is_empty() {
+            let mut new_dialog = dialog;
+            new_dialog.error = Some("Введите RadminVPN-адрес.".to_string());
+            self.add_dialog = Some(new_dialog);
+            return;
+        } else if port.is_none() {
+            let mut new_dialog = dialog;
+            new_dialog.error = Some("Введите корректный порт.".to_string());
+            self.add_dialog = Some(new_dialog);
+            return;
+        }
+
+        // Если это добавление нового узла - проверяем, что имя не занято
+        if !is_edit && self.peers.contains_key(&name) {
+            let mut new_dialog = dialog;
+            new_dialog.error = Some("Узел с таким названием уже добавлен.".to_string());
+            self.add_dialog = Some(new_dialog);
+            return;
+        }
+
+        // Если это редактирование - удаляем старую запись
+        if is_edit {
+            self.peers.remove(&original_name);
+            self.statuses.remove(&original_name);
+        }
+
+        // Добавляем новую запись
+        self.peers.insert(
+            name.clone(),
+            PeerInfo {
+                host,
+                port: port.unwrap(),
+            },
+        );
+        self.save_peers();
+
+        // Обновляем статус
+        self.spawn_ping(name);
     }
 
     fn show_confirm_remove(&mut self, ctx: &egui::Context) {
@@ -488,6 +537,65 @@ impl PeerApp {
             self.confirm_remove = None;
         } else if close {
             self.confirm_remove = None;
+        }
+    }
+
+    fn show_about_dialog(&mut self, ctx: &egui::Context) {
+        if !self.show_about {
+            return;
+        }
+        let mut close = false;
+
+        egui::Modal::new(egui::Id::new("about_modal")).show(ctx, |ui| {
+            ui.set_min_width(320.0);
+            ui.horizontal(|ui| {
+                ui.add(egui::Image::new((
+                    self.icon_texture.id(),
+                    egui::vec2(28.0, 28.0),
+                )));
+                ui.add_space(8.0);
+                ui.heading("Networked Program Peer");
+            });
+            ui.label(RichText::new(env!("APP_VERSION")).weak().size(12.0));
+            ui.add_space(10.0);
+
+            ui.label(RichText::new("Автор").strong());
+            ui.label("Discord: schrodinger71");
+            ui.add_space(10.0);
+
+            ui.label(RichText::new("Спонсоры").strong());
+            ui.label("Anagirii — Discord: anagiri");
+            ui.hyperlink_to("GitHub: Anagirii", "https://github.com/Anagirii");
+            ui.add_space(10.0);
+
+            ui.label(RichText::new("Лицензия").strong());
+            ui.label("AGPL-3.0-or-later");
+            ui.add_space(10.0);
+
+            ui.hyperlink_to(
+                "GitHub: Schrodinger71/peer-control-rs",
+                "https://github.com/Schrodinger71/peer-control-rs",
+            );
+            ui.add_space(10.0);
+
+            ui.label(
+                RichText::new(
+                    "Проект сделан в учебных целях. Автор не несёт ответственности \
+                    за любые последствия использования этой программы, включая ущерб, \
+                    причинённый её работой самому пользователю или третьим лицам.",
+                )
+                .color(ui.visuals().weak_text_color())
+                .size(11.0),
+            );
+
+            ui.add_space(12.0);
+            if ui.button("Закрыть").clicked() {
+                close = true;
+            }
+        });
+
+        if close {
+            self.show_about = false;
         }
     }
 
@@ -666,6 +774,15 @@ impl eframe::App for PeerApp {
                         if ui.button("↻ Обновить статус").clicked() {
                             self.refresh_all_statuses();
                         }
+                        if ui
+                            .add(
+                                egui::Button::new("ℹ О программе")
+                                    .fill(Color32::GOLD.linear_multiply(0.35)),
+                            )
+                            .clicked()
+                        {
+                            self.show_about = true;
+                        }
                     });
                 });
                 ui.label(RichText::new(env!("APP_VERSION")).weak().size(12.0));
@@ -752,6 +869,7 @@ impl eframe::App for PeerApp {
         self.show_add_dialog(&ctx);
         self.show_confirm_remove(&ctx);
         self.show_hotkey_capture(&ctx);
+        self.show_about_dialog(&ctx);
         self.show_error_dialog(&ctx);
         self.show_toasts(&ctx);
     }
