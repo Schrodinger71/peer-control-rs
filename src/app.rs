@@ -388,22 +388,22 @@ impl PeerApp {
             ui.heading("Новый узел сети");
             ui.add_space(8.0);
 
-            ui.label("Чтобы добавить узел, введите его название, айпи адрес узла например из RadminVPN и порт. \n\n\
-            Пример: название «Компьютер1», адрес «27.0.0.1», порт по умолчанию можно ни трогать.  \n\n\
-            Если RadminVPN-адрес — это «localhost», он будет заменён на «127.0.0.1». Таким образом вы добавите свой компьютер в список узлов. \n\n ");
+            ui.label("Введите данные узла, который вы хотите добавить в список. Узел должен быть запущен и доступен по сети. \n\n\
+            Если вы добавляете свой компьютер, используйте адрес 127.0.0.1 или localhost, порт 5990. \n\n\
+            Если вы добавляете другой компьютер в сети, используйте его айпи из RadminVPN и порт 5990 (по умолчанию). \n");
 
             egui::Grid::new("add_peer_grid")
                 .num_columns(2)
                 .show(ui, |ui| {
-                    ui.label("Название:");
+                    ui.label(RichText::new("Название:"));
                     ui.text_edit_singleline(&mut dialog.name);
                     ui.end_row();
 
-                    ui.label("RadminVPN-адрес (host):");
+                    ui.label(RichText::new("ip (host):"));
                     ui.text_edit_singleline(&mut dialog.host);
                     ui.end_row();
 
-                    ui.label("Порт:");
+                    ui.label(RichText::new("Порт:"));
                     ui.text_edit_singleline(&mut dialog.port);
                     ui.end_row();
                 });
