@@ -361,7 +361,7 @@ impl PeerApp {
                         }
                         if ui
                             .add(
-                                egui::Button::new("Перезагрузить")
+                                egui::Button::new("Перезапуск интернета")
                                     .fill(COLOR_ACCENT.linear_multiply(0.25)),
                             )
                             .clicked()
