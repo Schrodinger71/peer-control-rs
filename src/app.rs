@@ -361,7 +361,15 @@ impl PeerApp {
                         }
                         if ui
                             .add(
-                                egui::Button::new("Перезапуск интернета")
+                                egui::Button::new("⚙ Редактировать")
+                                    .fill(Color32::ORANGE.linear_multiply(0.25)),
+                            )
+                            .clicked() {
+                                self.add_dialog = Some(AddDialog::edit(name, &peer));
+                            }
+                        if ui
+                            .add(
+                                egui::Button::new("🔄 Перезапуск интернета")
                                     .fill(COLOR_ACCENT.linear_multiply(0.25)),
                             )
                             .clicked()
@@ -385,7 +393,12 @@ impl PeerApp {
 
         egui::Modal::new(egui::Id::new("add_peer_modal")).show(ctx, |ui| {
             ui.set_min_width(320.0);
-            ui.heading("Новый узел сети");
+
+            if dialog.is_edit {
+                ui.heading("Редактирование узла");
+            } else {
+                ui.heading("Новый узел сети");
+            }
             ui.add_space(8.0);
 
             ui.label("Введите данные узла, который вы хотите добавить в список. Узел должен быть запущен и доступен по сети. \n\n\
@@ -415,7 +428,8 @@ impl PeerApp {
 
             ui.add_space(10.0);
             ui.horizontal(|ui| {
-                if ui.button("Добавить").clicked() {
+                let button_text = if dialog.is_edit { "Сохранить" } else { "Добавить" };
+                if ui.button(button_text).clicked() {
                     submit = true;
                 }
                 if ui.button("Отмена").clicked() {
@@ -424,40 +438,72 @@ impl PeerApp {
             });
         });
 
-        if submit {
-            let name = dialog.name.trim().to_string();
-            let mut host = dialog.host.trim().to_string();
-            let port: Option<u16> = dialog.port.trim().parse().ok();
-
-            if host == "localhost" {
-                host = "127.0.0.1".to_string();
-            }
-
-            if name.is_empty() {
-                dialog.error = Some("Введите название компьютера.".to_string());
-            } else if self.peers.contains_key(&name) {
-                dialog.error = Some("Узел с таким названием уже добавлен.".to_string());
-            } else if host.is_empty() {
-                dialog.error = Some("Введите RadminVPN-адрес.".to_string());
-            } else if port.is_none() {
-                dialog.error = Some("Введите корректный порт.".to_string());
-            } else {
-                self.peers.insert(
-                    name.clone(),
-                    PeerInfo {
-                        host,
-                        port: port.unwrap(),
-                    },
-                );
-                self.save_peers();
-                self.add_dialog = None;
-                self.spawn_ping(name);
-                return;
-            }
-        }
+        // ЗАКРЫВАЕМ диалог, если нажата кнопка "Отмена"
         if close {
             self.add_dialog = None;
+            return;
         }
+
+        // Если не нажата кнопка "Добавить/Сохранить" - выходим
+        if !submit {
+            return;
+        }
+
+        let dialog = self.add_dialog.take().unwrap();
+        let is_edit = dialog.is_edit;
+        let original_name = dialog.original_name.clone();
+        let name = dialog.name.trim().to_string();
+        let mut host = dialog.host.trim().to_string();
+        let port: Option<u16> = dialog.port.trim().parse().ok();
+
+        if host == "localhost" {
+            host = "127.0.0.1".to_string();
+        }
+
+        // Проверяем ошибки
+        if name.is_empty() {
+            let mut new_dialog = dialog;
+            new_dialog.error = Some("Введите название компьютера.".to_string());
+            self.add_dialog = Some(new_dialog);
+            return;
+        } else if host.is_empty() {
+            let mut new_dialog = dialog;
+            new_dialog.error = Some("Введите RadminVPN-адрес.".to_string());
+            self.add_dialog = Some(new_dialog);
+            return;
+        } else if port.is_none() {
+            let mut new_dialog = dialog;
+            new_dialog.error = Some("Введите корректный порт.".to_string());
+            self.add_dialog = Some(new_dialog);
+            return;
+        }
+
+        // Если это добавление нового узла - проверяем, что имя не занято
+        if !is_edit && self.peers.contains_key(&name) {
+            let mut new_dialog = dialog;
+            new_dialog.error = Some("Узел с таким названием уже добавлен.".to_string());
+            self.add_dialog = Some(new_dialog);
+            return;
+        }
+
+        // Если это редактирование - удаляем старую запись
+        if is_edit {
+            self.peers.remove(&original_name);
+            self.statuses.remove(&original_name);
+        }
+
+        // Добавляем новую запись
+        self.peers.insert(
+            name.clone(),
+            PeerInfo {
+                host,
+                port: port.unwrap(),
+            },
+        );
+        self.save_peers();
+
+        // Обновляем статус
+        self.spawn_ping(name);
     }
 
     fn show_confirm_remove(&mut self, ctx: &egui::Context) {
