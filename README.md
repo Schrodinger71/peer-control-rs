@@ -66,4 +66,17 @@ v3.0](LICENSE) (AGPL-3.0).
 
 ## Автор
 
-Discord: schrodinger71
+<img src="https://github.com/Schrodinger71.png" width="60" height="60" alt="Schrodinger71" align="left" style="border-radius:50%; margin-right:10px">
+
+[**Schrodinger71**](https://github.com/Anagirii) — Discord: schrodinger
+
+<br clear="left">
+
+## Спонсоры
+
+<img src="https://github.com/Anagirii.png" width="60" height="60" alt="Anagirii" align="left" style="border-radius:50%; margin-right:10px">
+
+[**Anagirii**](https://github.com/Anagirii) — Discord: anagiri
+
+<br clear="left">
+

@@ -45,6 +45,7 @@ pub struct PeerApp {
     hotkey_active_id: Arc<Mutex<Option<u32>>>,
     hotkey_capture: Option<HotkeyCapture>,
     toasts: Vec<Toast>,
+    show_about: bool,
 }
 
 impl PeerApp {
@@ -128,6 +129,7 @@ impl PeerApp {
             hotkey_active_id,
             hotkey_capture: None,
             toasts: Vec::new(),
+            show_about: false,
         };
         if let Some(error) = startup_error {
             app.errors.push(error);
@@ -364,9 +366,10 @@ impl PeerApp {
                                 egui::Button::new("⚙ Редактировать")
                                     .fill(Color32::ORANGE.linear_multiply(0.25)),
                             )
-                            .clicked() {
-                                self.add_dialog = Some(AddDialog::edit(name, &peer));
-                            }
+                            .clicked()
+                        {
+                            self.add_dialog = Some(AddDialog::edit(name, &peer));
+                        }
                         if ui
                             .add(
                                 egui::Button::new("🔄 Перезапуск интернета")
@@ -534,6 +537,65 @@ impl PeerApp {
             self.confirm_remove = None;
         } else if close {
             self.confirm_remove = None;
+        }
+    }
+
+    fn show_about_dialog(&mut self, ctx: &egui::Context) {
+        if !self.show_about {
+            return;
+        }
+        let mut close = false;
+
+        egui::Modal::new(egui::Id::new("about_modal")).show(ctx, |ui| {
+            ui.set_min_width(320.0);
+            ui.horizontal(|ui| {
+                ui.add(egui::Image::new((
+                    self.icon_texture.id(),
+                    egui::vec2(28.0, 28.0),
+                )));
+                ui.add_space(8.0);
+                ui.heading("Networked Program Peer");
+            });
+            ui.label(RichText::new(env!("APP_VERSION")).weak().size(12.0));
+            ui.add_space(10.0);
+
+            ui.label(RichText::new("Автор").strong());
+            ui.label("Discord: schrodinger71");
+            ui.add_space(10.0);
+
+            ui.label(RichText::new("Спонсоры").strong());
+            ui.label("Anagirii — Discord: anagiri");
+            ui.hyperlink_to("GitHub: Anagirii", "https://github.com/Anagirii");
+            ui.add_space(10.0);
+
+            ui.label(RichText::new("Лицензия").strong());
+            ui.label("AGPL-3.0-or-later");
+            ui.add_space(10.0);
+
+            ui.hyperlink_to(
+                "GitHub: Schrodinger71/peer-control-rs",
+                "https://github.com/Schrodinger71/peer-control-rs",
+            );
+            ui.add_space(10.0);
+
+            ui.label(
+                RichText::new(
+                    "Проект сделан в учебных целях. Автор не несёт ответственности \
+                    за любые последствия использования этой программы, включая ущерб, \
+                    причинённый её работой самому пользователю или третьим лицам.",
+                )
+                .color(ui.visuals().weak_text_color())
+                .size(11.0),
+            );
+
+            ui.add_space(12.0);
+            if ui.button("Закрыть").clicked() {
+                close = true;
+            }
+        });
+
+        if close {
+            self.show_about = false;
         }
     }
 
@@ -712,6 +774,15 @@ impl eframe::App for PeerApp {
                         if ui.button("↻ Обновить статус").clicked() {
                             self.refresh_all_statuses();
                         }
+                        if ui
+                            .add(
+                                egui::Button::new("ℹ О программе")
+                                    .fill(Color32::GOLD.linear_multiply(0.35)),
+                            )
+                            .clicked()
+                        {
+                            self.show_about = true;
+                        }
                     });
                 });
                 ui.label(RichText::new(env!("APP_VERSION")).weak().size(12.0));
@@ -798,6 +869,7 @@ impl eframe::App for PeerApp {
         self.show_add_dialog(&ctx);
         self.show_confirm_remove(&ctx);
         self.show_hotkey_capture(&ctx);
+        self.show_about_dialog(&ctx);
         self.show_error_dialog(&ctx);
         self.show_toasts(&ctx);
     }
