@@ -561,6 +561,7 @@ impl PeerApp {
 
             ui.label(RichText::new("Автор").strong());
             ui.label("Discord: schrodinger71");
+            ui.hyperlink_to("GitHub: Schrodinger71", "https://github.com/Schrodinger71");
             ui.add_space(10.0);
 
             ui.label(RichText::new("Спонсоры").strong());
