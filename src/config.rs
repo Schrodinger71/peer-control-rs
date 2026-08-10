@@ -121,9 +121,9 @@ pub fn save_config(cfg: &Config) {
 pub fn default_peers() -> Peers {
     let mut peers = Peers::new();
     peers.insert(
-        "example-pc".to_string(),
+        "Ваш компьютер".to_string(),
         PeerInfo {
-            host: "26.0.0.1".to_string(),
+            host: "127.0.0.1".to_string(),
             port: 5990,
         },
     );
