@@ -68,7 +68,7 @@ v3.0](LICENSE) (AGPL-3.0).
 
 <img src="https://github.com/Schrodinger71.png" width="60" height="60" alt="Schrodinger71" align="left" style="border-radius:50%; margin-right:10px">
 
-[**Schrodinger71**](https://github.com/Schrodinger71) — Discord: schrodinger
+[**Schrodinger71**](https://github.com/Schrodinger71) — Discord: schrodinger71
 
 <br clear="left">
 
